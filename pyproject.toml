@@ -24,5 +24,8 @@ line-length = 100
 select = ["ALL"]
 ignore = ["CPY001", "D104", "D100", "D202", "D203", "D213", "D211", "S311"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ERA001", "D103", "S101"]
+
 [tool.pyrefly]
 project-includes = ["**/*.py*", "**/*.ipynb"]
