@@ -85,6 +85,7 @@ def main() -> None:
     parser.add_argument(
         "--ai", type=Path, default=None, metavar="FILE", help="watch a trained network play"
     )
+    parser.add_argument("--difficulty", choices=sorted(sim.CONFIGS), default="easy")
     args = parser.parse_args()
     brain = NeuralNetwork.load(args.ai) if args.ai else None
     pygame.init()
@@ -93,7 +94,7 @@ def main() -> None:
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 32, bold=True)
     images = load_images()
-    game = sim.Game(random.Random())
+    game = sim.Game(random.Random(), sim.CONFIGS[args.difficulty])
 
     if not _countdown(display, images, font, game):
         pygame.quit()

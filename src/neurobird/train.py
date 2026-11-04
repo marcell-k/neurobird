@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
+from neurobird import sim
 from neurobird.agent import run_episode
 from neurobird.nn import NeuralNetwork
 
@@ -14,19 +15,19 @@ EPISODES = 3  # games per network per generation, on shared seeds
 MUTATION_STRENGTH = 0.1
 
 
-def evaluate(nn: NeuralNetwork, seeds: list[int]) -> float:
+def evaluate(nn: NeuralNetwork, seeds: list[int], config: sim.GameConfig) -> float:
     """Average fitness of a network over the given game seeds."""
-    return float(np.mean([run_episode(nn, seed) for seed in seeds]))
+    return float(np.mean([run_episode(nn, seed, config) for seed in seeds]))
 
 
-def train(generations: int, rng: np.random.Generator) -> NeuralNetwork:
+def train(generations: int, rng: np.random.Generator, config: sim.GameConfig) -> NeuralNetwork:
     """Run the evolution loop and return the best network of the last generation."""
     population = [NeuralNetwork.random(rng) for _ in range(POPULATION)]
     best = population[0]
     for generation in range(generations):
         # Same seeds for everyone in a generation, so the comparison is fair.
         seeds = rng.integers(0, 2**31, EPISODES).tolist()
-        scores = [evaluate(nn, seeds) for nn in population]
+        scores = [evaluate(nn, seeds, config) for nn in population]
         order = np.argsort(scores)[::-1]
         ranked = [population[i] for i in order]
         best = ranked[0]
@@ -49,9 +50,11 @@ def main() -> None:
     parser.add_argument("--generations", type=int, default=50)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--output", type=Path, default=Path("best.npz"))
+    parser.add_argument("--difficulty", choices=sorted(sim.CONFIGS), default="easy")
     args = parser.parse_args()
 
-    best = train(args.generations, np.random.default_rng(args.seed))
+    rng = np.random.default_rng(args.seed)
+    best = train(args.generations, rng, sim.CONFIGS[args.difficulty])
     best.save(args.output)
     print(f"Saved best network to {args.output}")  # noqa: T201
 

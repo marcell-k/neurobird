@@ -48,9 +48,11 @@ def should_flap(nn: NeuralNetwork, game: sim.Game) -> bool:
     return nn.forward(observe(game)) > 0.0
 
 
-def run_episode(nn: NeuralNetwork, seed: int, max_frames: int = MAX_FRAMES) -> float:
+def run_episode(
+    nn: NeuralNetwork, seed: int, config: sim.GameConfig = sim.EASY, max_frames: int = MAX_FRAMES
+) -> float:
     """Play one game with the network; fitness is frames survived plus a score bonus."""
-    game = sim.Game(random.Random(seed))
+    game = sim.Game(random.Random(seed), config)
     while game.alive and game.frames < max_frames:
         game.step(flap=should_flap(nn, game))
     return game.frames + SCORE_BONUS * game.score
