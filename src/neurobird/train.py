@@ -1,90 +1,156 @@
 """Evolve a population of networks to play the game and save the best one."""
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
+from multiprocessing import get_context
 from pathlib import Path
 
 import numpy as np
 
-from neurobird import sim
-from neurobird.agent import run_episode
+from neurobird.agent import OBSERVATION_SIZE, run_episode
+from neurobird.config import CONFIGS, DEFAULT_TRAINING, EASY, GameConfig, TrainingConfig
 from neurobird.nn import NeuralNetwork
 
-POPULATION = 200
-ELITES = 10  # copied unchanged into the next generation
-TOURNAMENT_SIZE = 5  # parents are the best of this many random picks
-CROSSOVER_PROB = 0.5  # chance a child mixes two parents instead of cloning one
-EPISODES_START = 4  # games per network in the first generation, on shared seeds
-EPISODES_END = 12  # games per network in the last generation
-HALL_SIZE = 20  # how many per-generation champions get the final held-out re-evaluation
-HOLDOUT_EPISODES = 50  # fixed seeds used only to pick the network that gets saved
-MUTATION_START = 0.2  # noise std in the first generation
-MUTATION_END = 0.02  # noise std in the last generation
-MUTATION_RATE = 0.5  # fraction of weights that get noise in each child
 
-
-def evaluate(nn: NeuralNetwork, seeds: list[int], config: sim.GameConfig) -> float:
+def evaluate(nn: NeuralNetwork, seeds: list[int], config: GameConfig) -> float:
     """Average fitness of a network over the given game seeds."""
     return float(np.median([run_episode(nn, seed, config) for seed in seeds]))
 
 
-def episodes_at(generation: int, generations: int) -> int:
-    """Return the number of episodes per network, growing linearly from START to END."""
+def _evaluate_task(task: tuple[NeuralNetwork, list[int], GameConfig]) -> float:
+    """Evaluate one network; the entry point used by worker processes."""
+    nn, seeds, config = task
+    return evaluate(nn, seeds, config)
+
+
+def _evaluate_all(
+    pool: ProcessPoolExecutor | None,
+    networks: list[NeuralNetwork],
+    seeds: list[int],
+    config: GameConfig,
+) -> list[float]:
+    """Score each network over the same seeds, serially or with a worker pool."""
+    if pool is None:
+        return [evaluate(nn, seeds, config) for nn in networks]
+    tasks = [(nn, seeds, config) for nn in networks]
+    return list(pool.map(_evaluate_task, tasks))
+
+
+def episodes_at(generation: int, generations: int, training: TrainingConfig) -> int:
+    """Return the number of episodes per network, growing linearly from start to end."""
     t = generation / max(generations - 1, 1)
-    return round(EPISODES_START + (EPISODES_END - EPISODES_START) * t)
+    return round(training.episodes_start + (training.episodes_end - training.episodes_start) * t)
 
 
-def mutation_at(generation: int, generations: int) -> float:
-    """Mutation strength, decaying geometrically from START to END."""
+def mutation_at(generation: int, generations: int, training: TrainingConfig) -> float:
+    """Mutation strength, decaying geometrically from start to end."""
     t = generation / max(generations - 1, 1)
-    return MUTATION_START * (MUTATION_END / MUTATION_START) ** t
+    return training.mutation_start * (training.mutation_end / training.mutation_start) ** t
 
 
-def _tournament(ranked: list[NeuralNetwork], rng: np.random.Generator) -> NeuralNetwork:
+def warmup_generations(generations: int, final_config: GameConfig, training: TrainingConfig) -> int:
+    """Return the number of easy generations before switching to the target difficulty."""
+    if final_config == EASY or generations <= 1:
+        return 0
+    return min(round(generations * training.curriculum_fraction), generations - 1)
+
+
+def config_at(generation: int, easy_generations: int, final_config: GameConfig) -> GameConfig:
+    """Difficulty used for a generation: easy during the warm-up, target afterwards."""
+    return EASY if generation < easy_generations else final_config
+
+
+def _tournament(
+    ranked: list[NeuralNetwork], rng: np.random.Generator, training: TrainingConfig
+) -> NeuralNetwork:
     """Pick the best of a few random entries. `ranked` is sorted best first."""
-    picks = rng.integers(0, len(ranked), TOURNAMENT_SIZE)
+    picks = rng.integers(0, len(ranked), training.tournament_size)
     return ranked[int(picks.min())]
 
 
 def _make_child(
-    ranked: list[NeuralNetwork], rng: np.random.Generator, strength: float
+    ranked: list[NeuralNetwork],
+    rng: np.random.Generator,
+    strength: float,
+    training: TrainingConfig,
 ) -> NeuralNetwork:
     """Select a parent (maybe two, with crossover), then mutate the result."""
-    child = _tournament(ranked, rng)
-    if rng.random() < CROSSOVER_PROB:
-        child = child.crossover(_tournament(ranked, rng), rng)
-    return child.mutate(rng, strength, MUTATION_RATE)
+    child = _tournament(ranked, rng, training)
+    if rng.random() < training.crossover_prob:
+        child = child.crossover(_tournament(ranked, rng, training), rng)
+    return child.mutate(rng, strength, training.mutation_rate)
 
 
-def train(generations: int, rng: np.random.Generator, config: sim.GameConfig) -> NeuralNetwork:
+def train(
+    generations: int,
+    rng: np.random.Generator,
+    config: GameConfig,
+    *,
+    training: TrainingConfig = DEFAULT_TRAINING,
+) -> NeuralNetwork:
     """Run the evolution loop and return the champion that does best on held-out seeds."""
-    population = [NeuralNetwork.random(rng) for _ in range(POPULATION)]
-    holdout_seeds = rng.integers(0, 2**31, HOLDOUT_EPISODES).tolist()
+    if training.workers <= 1:
+        return _train(generations, rng, config, training, None)
+    max_workers = min(training.workers, os.cpu_count() or 1)
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context("spawn")) as pool:
+        return _train(generations, rng, config, training, pool)
+
+
+def _train(
+    generations: int,
+    rng: np.random.Generator,
+    config: GameConfig,
+    training: TrainingConfig,
+    pool: ProcessPoolExecutor | None,
+) -> NeuralNetwork:
+    """Run the evolution loop with an already configured evaluation pool."""
+    easy_generations = (
+        warmup_generations(generations, config, training) if training.curriculum else 0
+    )
+    population = [NeuralNetwork.random(rng, OBSERVATION_SIZE) for _ in range(training.population)]
+    holdout_seeds = rng.integers(0, 2**31, training.holdout_episodes).tolist()
     hall: list[tuple[float, NeuralNetwork]] = []  # (training score, champion) per generation
+    target_name = "easy" if config == EASY else "hard"
     for generation in range(generations):
+        if generation == easy_generations and easy_generations > 0:
+            print(f"switching to {target_name} at generation {generation + 1}")  # noqa: T201
         # Same seeds for everyone in a generation, so the comparison is fair.
-        episodes = episodes_at(generation, generations)
-        strength = mutation_at(generation, generations)
+        generation_config = config_at(generation, easy_generations, config)
+        episodes = episodes_at(generation, generations, training)
+        strength = mutation_at(generation, generations, training)
         seeds = rng.integers(0, 2**31, episodes).tolist()
-        scores = [evaluate(nn, seeds, config) for nn in population]
+        scores = _evaluate_all(pool, population, seeds, generation_config)
         order = np.argsort(scores)[::-1]
         ranked = [population[i] for i in order]
-        hall.append((scores[order[0]], ranked[0]))
+        # Only target-difficulty champions are comparable, so easy warm-up scores are skipped.
+        if generation >= easy_generations:
+            hall.append((scores[order[0]], ranked[0]))
         if generation % 10 == 0:
+            phase = "easy" if generation < easy_generations else target_name
             print(  # noqa: T201
-                f"gen {generation + 1:4d}  eps {episodes:2d}  mut {strength:.3f}  "
+                f"gen {generation + 1:4d}  {phase:4s}  eps {episodes:2d}  mut {strength:.3f}  "
                 f"best {scores[order[0]]:9.1f}  mean {float(np.mean(scores)):9.1f}"
             )
-        children = [_make_child(ranked, rng, strength) for _ in range(POPULATION - ELITES)]
-        population = [*ranked[:ELITES], *children]
-    return _pick_champion(hall, holdout_seeds, config)
+        children = [
+            _make_child(ranked, rng, strength, training)
+            for _ in range(training.population - training.elites)
+        ]
+        population = [*ranked[: training.elites], *children]
+    return _pick_champion(hall, holdout_seeds, config, training, pool)
 
 
 def _pick_champion(
-    hall: list[tuple[float, NeuralNetwork]], holdout_seeds: list[int], config: sim.GameConfig
+    hall: list[tuple[float, NeuralNetwork]],
+    holdout_seeds: list[int],
+    config: GameConfig,
+    training: TrainingConfig,
+    pool: ProcessPoolExecutor | None,
 ) -> NeuralNetwork:
     """Re-score the best hall-of-fame entries on fixed unseen seeds and return the winner."""
-    top = sorted(hall, key=lambda entry: entry[0], reverse=True)[:HALL_SIZE]
-    held_out = [evaluate(nn, holdout_seeds, config) for _, nn in top]
+    top = sorted(hall, key=lambda entry: entry[0], reverse=True)[: training.hall_size]
+    held_out = _evaluate_all(pool, [nn for _, nn in top], holdout_seeds, config)
     winner = int(np.argmax(held_out))
     print(  # noqa: T201
         f"hall of fame: {len(top)} candidates, "
@@ -99,11 +165,26 @@ def main() -> None:
     parser.add_argument("--generations", type=int, default=50)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--output", type=Path, default=Path("best.npz"))
-    parser.add_argument("--difficulty", choices=sorted(sim.CONFIGS), default="easy")
+    parser.add_argument("--difficulty", choices=sorted(CONFIGS), default="hard")
+    parser.add_argument(
+        "--curriculum",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_TRAINING.curriculum,
+        help="train on easy first, then switch to --difficulty",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(DEFAULT_TRAINING.workers, os.cpu_count() or 1),
+        help="parallel evaluation processes (1 disables multiprocessing)",
+    )
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
 
+    training = replace(DEFAULT_TRAINING, curriculum=args.curriculum, workers=args.workers)
     rng = np.random.default_rng(args.seed)
-    best = train(args.generations, rng, sim.CONFIGS[args.difficulty])
+    best = train(args.generations, rng, CONFIGS[args.difficulty], training=training)
     best.save(args.output)
     print(f"Saved best network to {args.output}")  # noqa: T201
 

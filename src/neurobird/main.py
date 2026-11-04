@@ -10,10 +10,18 @@ from pygame import Surface
 
 from neurobird import sim
 from neurobird.agent import should_flap
+from neurobird.config import (
+    BIRD_X,
+    CONFIGS,
+    FPS,
+    IMAGES_DIR,
+    PIECE_HEIGHT,
+    STEP_MSEC,
+    WHITE,
+    WORLD_HEIGHT,
+    WORLD_WIDTH,
+)
 from neurobird.nn import NeuralNetwork
-
-IMAGES_DIR = Path("images")
-WHITE = (255, 255, 255)
 
 
 def load_images() -> dict[str, Surface]:
@@ -35,11 +43,11 @@ def _draw_pipe(surface: Surface, images: dict[str, Surface], pipe: sim.Pipe) -> 
     """Draw both halves of a pipe from its gap bounds."""
     x = round(pipe.x)
     body, end = images["pipe-body"], images["pipe-end"]
-    for y in range(0, pipe.gap_top - sim.PIECE_HEIGHT, sim.PIECE_HEIGHT):
+    for y in range(0, pipe.gap_top - PIECE_HEIGHT, PIECE_HEIGHT):
         surface.blit(body, (x, y))
-    surface.blit(end, (x, pipe.gap_top - sim.PIECE_HEIGHT))
+    surface.blit(end, (x, pipe.gap_top - PIECE_HEIGHT))
     surface.blit(end, (x, pipe.gap_bottom))
-    for y in range(pipe.gap_bottom + sim.PIECE_HEIGHT, sim.WORLD_HEIGHT, sim.PIECE_HEIGHT):
+    for y in range(pipe.gap_bottom + PIECE_HEIGHT, WORLD_HEIGHT, PIECE_HEIGHT):
         surface.blit(body, (x, y))
 
 
@@ -47,15 +55,15 @@ def _draw(
     display: Surface, images: dict[str, Surface], font: pygame.font.Font, game: sim.Game
 ) -> None:
     """Draw the current state of the game."""
-    for x in (0, sim.WORLD_WIDTH // 2):
+    for x in (0, WORLD_WIDTH // 2):
         display.blit(images["background"], (x, 0))
     for pipe in game.pipes:
         _draw_pipe(display, images, pipe)
-    wings_up = (game.frames * sim.STEP_MSEC) % 500 >= 250  # noqa: PLR2004
+    wings_up = (game.frames * STEP_MSEC) % 500 >= 250  # noqa: PLR2004
     bird_image = images["bird-wingup" if wings_up else "bird-wingdown"]
-    display.blit(bird_image, (sim.BIRD_X, round(game.y)))
+    display.blit(bird_image, (BIRD_X, round(game.y)))
     label = font.render(str(game.score), antialias=True, color=WHITE)
-    display.blit(label, ((sim.WORLD_WIDTH - label.get_width()) // 2, sim.PIECE_HEIGHT))
+    display.blit(label, ((WORLD_WIDTH - label.get_width()) // 2, PIECE_HEIGHT))
 
 
 def _countdown(
@@ -73,9 +81,9 @@ def _countdown(
             return False
         _draw(display, images, font, game)
         label = font.render(str(math.ceil(remaining / 1000)), antialias=True, color=WHITE)
-        display.blit(label, ((sim.WORLD_WIDTH - label.get_width()) // 2, sim.WORLD_HEIGHT // 3))
+        display.blit(label, ((WORLD_WIDTH - label.get_width()) // 2, WORLD_HEIGHT // 3))
         pygame.display.flip()
-        clock.tick(sim.FPS)
+        clock.tick(FPS)
     return True
 
 
@@ -85,16 +93,16 @@ def main() -> None:
     parser.add_argument(
         "--ai", type=Path, default=None, metavar="FILE", help="watch a trained network play"
     )
-    parser.add_argument("--difficulty", choices=sorted(sim.CONFIGS), default="easy")
+    parser.add_argument("--difficulty", choices=sorted(CONFIGS), default="easy")
     args = parser.parse_args()
     brain = NeuralNetwork.load(args.ai) if args.ai else None
     pygame.init()
-    display = pygame.display.set_mode((sim.WORLD_WIDTH, sim.WORLD_HEIGHT))
+    display = pygame.display.set_mode((WORLD_WIDTH, WORLD_HEIGHT))
     pygame.display.set_caption("Pygame Flappy Bird")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 32, bold=True)
     images = load_images()
-    game = sim.Game(random.Random(), sim.CONFIGS[args.difficulty])
+    game = sim.Game(random.Random(), CONFIGS[args.difficulty])
 
     if not _countdown(display, images, font, game):
         pygame.quit()
@@ -102,7 +110,7 @@ def main() -> None:
 
     running = True
     while running and game.alive:
-        clock.tick(sim.FPS)
+        clock.tick(FPS)
         flap = False
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
