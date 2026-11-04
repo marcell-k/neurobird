@@ -23,7 +23,7 @@ class NeuralNetwork:
     b2: Vector  # (1,)
 
     @classmethod
-    def random(cls, rng: np.random.Generator, input_size: int = 5, hidden_size: int = 6) -> Self:
+    def random(cls, rng: np.random.Generator, input_size: int = 6, hidden_size: int = 6) -> Self:
         """Create a network with normally distributed weights scaled by 1/sqrt(fan_in)."""
         w1 = rng.normal(0.0, 1.0 / np.sqrt(input_size), (hidden_size, input_size))
         w2 = rng.normal(0.0, 1.0 / np.sqrt(hidden_size), (1, hidden_size))

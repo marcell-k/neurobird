@@ -21,16 +21,18 @@ def _norm_y(y: float) -> float:
 
 
 def observe(game: sim.Game) -> Vector:
-    """Build the network's five normalized inputs from the current game state."""
+    """Build the network's six normalized inputs from the current game state."""
     pipe = game.next_pipe()
     if pipe is None:
         # No pipe yet: pretend a far away pipe with a centered gap.
         dx = 1.0
         gap_top = (sim.WORLD_HEIGHT - sim.GAP_HEIGHT) / 2
         gap_bottom = gap_top + sim.GAP_HEIGHT
+        gap_vy = 0.0
     else:
         dx = (pipe.x - sim.BIRD_X) / (sim.WORLD_WIDTH - sim.BIRD_X)
         gap_top, gap_bottom = pipe.gap_top, pipe.gap_bottom
+        gap_vy = pipe.gap_velocity / sim.MAX_GAP_SPEED
     return np.array(
         [
             _norm_y(game.y + sim.BIRD_SIZE / 2),
@@ -38,6 +40,7 @@ def observe(game: sim.Game) -> Vector:
             dx,
             _norm_y(gap_top),
             _norm_y(gap_bottom),
+            gap_vy,
         ],
         dtype=np.float64,
     )

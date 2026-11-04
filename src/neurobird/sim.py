@@ -1,8 +1,12 @@
 """Simulation, needed for neural network headless run."""
 
+import math
 from collections import deque
 from dataclasses import dataclass
-lazy import random
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import random
 
 FPS = 60
 STEP_MSEC = 1000.0 / FPS
@@ -21,6 +25,9 @@ GAP_HEIGHT = 128
 PIPE_SPEED = 0.18  # px/ms
 PIPE_SPACING = 540.0  # px between consecutive pipes (3000 ms at the base speed)
 MAX_GAP_TOP_PIECES = 10
+MOVE_AMPLITUDE = 48  # px a moving gap swings above and below its resting position
+MOVE_PERIOD_FRAMES = 120  # frames per full up-and-down swing
+MAX_GAP_SPEED = MOVE_AMPLITUDE * 2 * math.pi / MOVE_PERIOD_FRAMES  # px/frame, peak
 
 
 def _lerp(start: float, end: float, t: float) -> float:
@@ -38,6 +45,7 @@ class GameConfig:
     end_pipe_speed: float = PIPE_SPEED
     end_gap_height: int = GAP_HEIGHT
     end_pipe_spacing: float = PIPE_SPACING
+    moving_pipes: bool = False
 
     def progress(self, frames: int) -> float:
         """Fraction of the ramp completed, from 0.0 to 1.0."""
@@ -60,7 +68,11 @@ class GameConfig:
 
 EASY = GameConfig()
 HARD = GameConfig(
-    ramp_frames=60 * FPS, end_pipe_speed=0.27, end_gap_height=96, end_pipe_spacing=320
+    ramp_frames=60 * FPS,
+    end_pipe_speed=0.27,
+    end_gap_height=96,
+    end_pipe_spacing=320,
+    moving_pipes=True,
 )
 
 CONFIGS = {"easy": EASY, "hard": HARD}
@@ -74,6 +86,21 @@ class Pipe:
     gap_top: int
     gap_bottom: int
     scored: bool = False
+    base_top: int = 0  # resting gap_top; a moving gap oscillates around it
+    phase: float = 0.0  # radians
+    age: int = 0  # frames since spawn
+    gap_velocity: float = 0.0  # px/frame, positive is down
+
+
+def _move_gap(pipe: Pipe) -> None:
+    """Oscillate a pipe's gap around its resting position, keeping it on screen."""
+    angle = pipe.phase + 2 * math.pi * pipe.age / MOVE_PERIOD_FRAMES
+    low, high = PIECE_HEIGHT, MAX_GAP_TOP_PIECES * PIECE_HEIGHT
+    size = pipe.gap_bottom - pipe.gap_top
+    pipe.gap_top = max(low, min(high, round(pipe.base_top + MOVE_AMPLITUDE * math.sin(angle))))
+    pipe.gap_bottom = pipe.gap_top + size
+    pipe.gap_velocity = MAX_GAP_SPEED * math.cos(angle)
+    pipe.age += 1
 
 
 class Game:
@@ -105,6 +132,9 @@ class Game:
             pipe.x -= speed * STEP_MSEC
         while self.pipes and self.pipes[0].x <= -PIPE_WIDTH:
             self.pipes.popleft()
+        if self.config.moving_pipes:
+            for pipe in self.pipes:
+                _move_gap(pipe)
         if self._collides():
             self.alive = False
         for pipe in self.pipes:
@@ -125,7 +155,9 @@ class Game:
     def _spawn_pipe(self) -> None:
         gap_top = self._rng.randint(1, MAX_GAP_TOP_PIECES) * PIECE_HEIGHT
         gap_height = self.config.gap_at(self.frames)
-        self.pipes.append(Pipe(WORLD_WIDTH - 1, gap_top, gap_top + gap_height))
+        phase = self._rng.uniform(0.0, 2 * math.pi) if self.config.moving_pipes else 0.0
+        pipe = Pipe(WORLD_WIDTH - 1, gap_top, gap_top + gap_height, base_top=gap_top, phase=phase)
+        self.pipes.append(pipe)
 
     def _collides(self) -> bool:
         if self.y <= 0 or self.y >= WORLD_HEIGHT - BIRD_SIZE:
