@@ -1,10 +1,13 @@
 """Two layer neural network."""
 
 from dataclasses import dataclass
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import numpy as np
 import numpy.typing as npt
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 type Matrix = npt.NDArray[np.float64]
 type Vector = npt.NDArray[np.float64]
@@ -39,3 +42,13 @@ class NeuralNetwork:
             self.w2 + rng.normal(0.0, strength, self.w2.shape),
             self.b2 + rng.normal(0.0, strength, self.b2.shape),
         )
+
+    @classmethod
+    def load(cls, path: Path) -> Self:
+        """Load a network previously written by `save`."""
+        with np.load(path) as data:
+            return cls(data["w1"], data["b1"], data["w2"], data["b2"])
+
+    def save(self, path: Path) -> None:
+        """Write the weights and biases to a .npz file."""
+        np.savez(path, w1=self.w1, b1=self.b1, w2=self.w2, b2=self.b2)

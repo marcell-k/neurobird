@@ -9,6 +9,7 @@ dependencies = ["numpy>=2.5.4", "pygame-ce>=2.5.8"]
 
 [project.scripts]
 neurobird = "neurobird.main:main"
+neurobird-train = "neurobird.train:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

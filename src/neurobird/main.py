@@ -1,5 +1,6 @@
 """Pygame renderer and human-play entry point for the headless game."""
 
+import argparse
 import math
 import random
 from pathlib import Path
@@ -8,6 +9,8 @@ import pygame
 from pygame import Surface
 
 from neurobird import sim
+from neurobird.agent import should_flap
+from neurobird.nn import NeuralNetwork
 
 IMAGES_DIR = Path("images")
 WHITE = (255, 255, 255)
@@ -77,7 +80,13 @@ def _countdown(
 
 
 def main() -> None:
-    """Application's entry point: play the game as a human."""
+    """Application's entry point: play as a human, or watch a saved network with --ai."""
+    parser = argparse.ArgumentParser(description="Pygame Flappy Bird")
+    parser.add_argument(
+        "--ai", type=Path, default=None, metavar="FILE", help="watch a trained network play"
+    )
+    args = parser.parse_args()
+    brain = NeuralNetwork.load(args.ai) if args.ai else None
     pygame.init()
     display = pygame.display.set_mode((sim.WORLD_WIDTH, sim.WORLD_HEIGHT))
     pygame.display.set_caption("Pygame Flappy Bird")
@@ -99,6 +108,8 @@ def main() -> None:
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE:
                 flap = True
+        if brain is not None:
+            flap = should_flap(brain, game)
         game.step(flap=flap)
         _draw(display, images, font, game)
         pygame.display.flip()
