@@ -52,13 +52,23 @@ class NeuralNetwork:
         hidden = np.tanh(self.w1 @ x + self.b1)
         return float((self.w2 @ hidden + self.b2)[0])
 
-    def mutate(self, rng: np.random.Generator, strength: float) -> NeuralNetwork:
-        """Return a new network with Gaussian noise added to every weight and bias."""
+    def mutate(self, rng: np.random.Generator, strength: float, rate: float = 1.0) -> NeuralNetwork:
+        """Return a new network with Gaussian noise added to a random `rate` fraction of values."""
+
+        def noisy(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            mask = rng.random(values.shape) < rate
+            return values + mask * rng.normal(0.0, strength, values.shape)
+
+        return NeuralNetwork(noisy(self.w1), noisy(self.b1), noisy(self.w2), noisy(self.b2))
+
+    def crossover(self, other: NeuralNetwork, rng: np.random.Generator) -> NeuralNetwork:
+        """Build a child by taking each hidden unit (its inputs, bias and output) from a parent."""
+        from_self = rng.random(self.b1.shape) < 0.5  # noqa: PLR2004
         return NeuralNetwork(
-            self.w1 + rng.normal(0.0, strength, self.w1.shape),
-            self.b1 + rng.normal(0.0, strength, self.b1.shape),
-            self.w2 + rng.normal(0.0, strength, self.w2.shape),
-            self.b2 + rng.normal(0.0, strength, self.b2.shape),
+            np.where(from_self[:, None], self.w1, other.w1),
+            np.where(from_self, self.b1, other.b1),
+            np.where(from_self[None, :], self.w2, other.w2),
+            self.b2.copy(),
         )
 
     @classmethod
