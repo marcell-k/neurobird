@@ -51,10 +51,10 @@ def _draw(
         display.blit(images["background"], (x, 0))
     for pipe in game.pipes:
         _draw_pipe(display, images, pipe)
-    wings_up = (game.frames * sim.STEP_MSEC) % 500 >= 250
+    wings_up = (game.frames * sim.STEP_MSEC) % 500 >= 250  # noqa: PLR2004
     bird_image = images["bird-wingup" if wings_up else "bird-wingdown"]
     display.blit(bird_image, (sim.BIRD_X, round(game.y)))
-    label = font.render(str(game.score), True, WHITE)
+    label = font.render(str(game.score), antialias=True, color=WHITE)
     display.blit(label, ((sim.WORLD_WIDTH - label.get_width()) // 2, sim.PIECE_HEIGHT))
 
 
@@ -72,7 +72,7 @@ def _countdown(
         if any(e.type == pygame.QUIT for e in pygame.event.get()):
             return False
         _draw(display, images, font, game)
-        label = font.render(str(math.ceil(remaining / 1000)), True, WHITE)
+        label = font.render(str(math.ceil(remaining / 1000)), antialias=True, color=WHITE)
         display.blit(label, ((sim.WORLD_WIDTH - label.get_width()) // 2, sim.WORLD_HEIGHT // 3))
         pygame.display.flip()
         clock.tick(sim.FPS)

@@ -1,16 +1,32 @@
 """Two layer neural network."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
+
+INPUT_SIZE = 12
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 type Matrix = npt.NDArray[np.float64]
 type Vector = npt.NDArray[np.float64]
+
+# Inputs:
+# 1.  Bird vertical position
+# 2.  Bird vertical velocity
+# 3.  Current pipe speed
+# 4.  Horizontal distance to the next pipe
+# 5.  Bird center offset from the gap center
+# 6.  Clearance to the top pipe (bird_top - gap_top)
+# 7.  Clearance to the bottom pipe (gap_bottom - bird_bottom)
+# 8.  Gap vertical velocity
+# 9.  Predicted gap center offset at arrival, relative to the bird
+# 10. Gap height
+# 11. Horizontal distance to the second upcoming pipe
+# 12. Gap center shift between the next two pipes
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -23,7 +39,9 @@ class NeuralNetwork:
     b2: Vector  # (1,)
 
     @classmethod
-    def random(cls, rng: np.random.Generator, input_size: int = 6, hidden_size: int = 6) -> Self:
+    def random(
+        cls, rng: np.random.Generator, input_size: int = INPUT_SIZE, hidden_size: int = 6
+    ) -> NeuralNetwork:
         """Create a network with normally distributed weights scaled by 1/sqrt(fan_in)."""
         w1 = rng.normal(0.0, 1.0 / np.sqrt(input_size), (hidden_size, input_size))
         w2 = rng.normal(0.0, 1.0 / np.sqrt(hidden_size), (1, hidden_size))
@@ -44,7 +62,7 @@ class NeuralNetwork:
         )
 
     @classmethod
-    def load(cls, path: Path) -> Self:
+    def load(cls, path: Path) -> NeuralNetwork:
         """Load a network previously written by `save`."""
         with np.load(path) as data:
             return cls(data["w1"], data["b1"], data["w2"], data["b2"])

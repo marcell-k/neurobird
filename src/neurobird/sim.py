@@ -3,6 +3,7 @@
 import math
 from collections import deque
 from dataclasses import dataclass
+from itertools import islice
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -92,14 +93,22 @@ class Pipe:
     gap_velocity: float = 0.0  # px/frame, positive is down
 
 
+def _angle(pipe: Pipe, age: int) -> float:
+    return pipe.phase + 2 * math.pi * age / MOVE_PERIOD_FRAMES
+
+
+def _gap_top_at(pipe: Pipe, age: int) -> int:
+    """Gap top of a moving pipe at the given age, kept on screen."""
+    low, high = PIECE_HEIGHT, MAX_GAP_TOP_PIECES * PIECE_HEIGHT
+    return max(low, min(high, round(pipe.base_top + MOVE_AMPLITUDE * math.sin(_angle(pipe, age)))))
+
+
 def _move_gap(pipe: Pipe) -> None:
     """Oscillate a pipe's gap around its resting position, keeping it on screen."""
-    angle = pipe.phase + 2 * math.pi * pipe.age / MOVE_PERIOD_FRAMES
-    low, high = PIECE_HEIGHT, MAX_GAP_TOP_PIECES * PIECE_HEIGHT
     size = pipe.gap_bottom - pipe.gap_top
-    pipe.gap_top = max(low, min(high, round(pipe.base_top + MOVE_AMPLITUDE * math.sin(angle))))
+    pipe.gap_top = _gap_top_at(pipe, pipe.age)
     pipe.gap_bottom = pipe.gap_top + size
-    pipe.gap_velocity = MAX_GAP_SPEED * math.cos(angle)
+    pipe.gap_velocity = MAX_GAP_SPEED * math.cos(_angle(pipe, pipe.age))
     pipe.age += 1
 
 
@@ -117,7 +126,7 @@ class Game:
         self.frames = 0
         self.alive = True
 
-    def step(self, *, flap: bool) -> None:
+    def step(self, *, flap: bool) -> None:  # noqa: C901
         """Advance one fixed time step, optionally flapping. Does nothing once dead."""
         if not self.alive:
             return
@@ -143,9 +152,20 @@ class Game:
                 self.score += 1
         self.frames += 1
 
+    def upcoming_pipes(self, count: int) -> list[Pipe]:
+        """Get up to `count` pipes the bird has not fully passed, nearest first."""
+        return list(islice((p for p in self.pipes if p.x + PIPE_WIDTH >= BIRD_X), count))
+
     def next_pipe(self) -> Pipe | None:
         """Get the closest pipe the bird has not fully passed, if any."""
-        return next((p for p in self.pipes if p.x + PIPE_WIDTH >= BIRD_X), None)
+        upcoming = self.upcoming_pipes(1)
+        return upcoming[0] if upcoming else None
+
+    def predicted_gap_top(self, pipe: Pipe, frames_ahead: int) -> int:
+        """Where the pipe's gap top will be after `frames_ahead` more steps."""
+        if frames_ahead <= 0 or not self.config.moving_pipes:
+            return pipe.gap_top
+        return _gap_top_at(pipe, pipe.age + frames_ahead - 1)
 
     def _should_spawn(self) -> bool:
         if not self.pipes:
