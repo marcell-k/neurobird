@@ -42,24 +42,36 @@ class Pipe:
     age: int = 0  # frames since spawn
     gap_velocity: float = 0.0  # px/frame, positive is down
 
+    @property
+    def gap_height(self) -> int:
+        """Vertical size of the gap in px."""
+        return self.gap_bottom - self.gap_top
 
-def _angle(pipe: Pipe, age: int) -> float:
-    return pipe.phase + 2 * math.pi * age / MOVE_PERIOD_FRAMES
+    def gap_top_at(self, age: int) -> int:
+        """Gap top of a moving pipe at the given age, kept on screen."""
+        low, high = PIECE_HEIGHT, MAX_GAP_TOP_PIECES * PIECE_HEIGHT
+        return max(
+            low, min(high, round(self.base_top + MOVE_AMPLITUDE * math.sin(self._angle(age))))
+        )
 
+    def advance(self) -> None:
+        """Oscillate the gap around its resting position, keeping it on screen."""
+        height = self.gap_height
+        self.gap_top = self.gap_top_at(self.age)
+        self.gap_bottom = self.gap_top + height
+        self.gap_velocity = MAX_GAP_SPEED * math.cos(self._angle(self.age))
+        self.age += 1
 
-def _gap_top_at(pipe: Pipe, age: int) -> int:
-    """Gap top of a moving pipe at the given age, kept on screen."""
-    low, high = PIECE_HEIGHT, MAX_GAP_TOP_PIECES * PIECE_HEIGHT
-    return max(low, min(high, round(pipe.base_top + MOVE_AMPLITUDE * math.sin(_angle(pipe, age)))))
+    def hits(self, y: float) -> bool:
+        """Whether a bird whose top edge is at `y` overlaps this pipe."""
+        return (
+            self.x < BIRD_X + BIRD_SIZE
+            and self.x + PIPE_WIDTH > BIRD_X
+            and (y < self.gap_top or y + BIRD_SIZE > self.gap_bottom)
+        )
 
-
-def _move_gap(pipe: Pipe) -> None:
-    """Oscillate a pipe's gap around its resting position, keeping it on screen."""
-    size = pipe.gap_bottom - pipe.gap_top
-    pipe.gap_top = _gap_top_at(pipe, pipe.age)
-    pipe.gap_bottom = pipe.gap_top + size
-    pipe.gap_velocity = MAX_GAP_SPEED * math.cos(_angle(pipe, pipe.age))
-    pipe.age += 1
+    def _angle(self, age: int) -> float:
+        return self.phase + 2 * math.pi * age / MOVE_PERIOD_FRAMES
 
 
 class Game:
@@ -76,7 +88,7 @@ class Game:
         self.frames = 0
         self.alive = True
 
-    def step(self, *, flap: bool) -> None:  # noqa: C901
+    def step(self, *, flap: bool) -> None:
         """Advance one fixed time step, optionally flapping. Does nothing once dead."""
         if not self.alive:
             return
@@ -86,36 +98,32 @@ class Game:
             self.velocity = FLAP_VELOCITY
         self.velocity = min(self.velocity + GRAVITY * STEP_MSEC, MAX_FALL_SPEED)
         self.y += self.velocity * STEP_MSEC
-        speed = self.config.speed_at(self.frames)
-        for pipe in self.pipes:
-            pipe.x -= speed * STEP_MSEC
-        while self.pipes and self.pipes[0].x <= -PIPE_WIDTH:
-            self.pipes.popleft()
-        if self.config.moving_pipes:
-            for pipe in self.pipes:
-                _move_gap(pipe)
+        self._advance_pipes(self.config.speed_at(self.frames) * STEP_MSEC)
         if self._collides():
             self.alive = False
-        for pipe in self.pipes:
-            if not pipe.scored and pipe.x + PIPE_WIDTH < BIRD_X:
-                pipe.scored = True
-                self.score += 1
         self.frames += 1
 
     def upcoming_pipes(self, count: int) -> list[Pipe]:
         """Get up to `count` pipes the bird has not fully passed, nearest first."""
         return list(islice((p for p in self.pipes if p.x + PIPE_WIDTH >= BIRD_X), count))
 
-    def next_pipe(self) -> Pipe | None:
-        """Get the closest pipe the bird has not fully passed, if any."""
-        upcoming = self.upcoming_pipes(1)
-        return upcoming[0] if upcoming else None
-
     def predicted_gap_top(self, pipe: Pipe, frames_ahead: int) -> int:
         """Where the pipe's gap top will be after `frames_ahead` more steps."""
         if frames_ahead <= 0 or not self.config.moving_pipes:
             return pipe.gap_top
-        return _gap_top_at(pipe, pipe.age + frames_ahead - 1)
+        return pipe.gap_top_at(pipe.age + frames_ahead - 1)
+
+    def _advance_pipes(self, dx: float) -> None:
+        """Scroll pipes left by `dx`, move their gaps, score passed pipes, drop off-screen ones."""
+        for pipe in self.pipes:
+            pipe.x -= dx
+            if self.config.moving_pipes:
+                pipe.advance()
+            if not pipe.scored and pipe.x + PIPE_WIDTH < BIRD_X:
+                pipe.scored = True
+                self.score += 1
+        while self.pipes and self.pipes[0].x <= -PIPE_WIDTH:
+            self.pipes.popleft()
 
     def _should_spawn(self) -> bool:
         if not self.pipes:
@@ -132,9 +140,4 @@ class Game:
     def _collides(self) -> bool:
         if self.y <= 0 or self.y >= WORLD_HEIGHT - BIRD_SIZE:
             return True
-        return any(
-            pipe.x < BIRD_X + BIRD_SIZE
-            and pipe.x + PIPE_WIDTH > BIRD_X
-            and (self.y < pipe.gap_top or self.y + BIRD_SIZE > pipe.gap_bottom)
-            for pipe in self.pipes
-        )
+        return any(pipe.hits(self.y) for pipe in self.pipes)

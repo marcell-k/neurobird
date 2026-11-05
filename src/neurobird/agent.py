@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
 def _norm_y(y: float) -> float:
     """Map a vertical pixel position to [-1,1]."""
-
     return 2.0 * y / WORLD_HEIGHT - 1.0
 
 
@@ -50,7 +49,7 @@ def _frames_to_reach(game: sim.Game, pipe: sim.Pipe) -> int:
 def _gap_features(game: sim.Game, pipe: sim.Pipe) -> list[float]:
     """Seven inputs describing the bird relative to one pipe's gap."""
     bird_center = game.y + BIRD_SIZE / 2
-    gap_height = pipe.gap_bottom - pipe.gap_top
+    gap_height = pipe.gap_height
     arrival_top = game.predicted_gap_top(pipe, _frames_to_reach(game, pipe))
     return [
         (pipe.x - BIRD_X) / DX_SCALE,
@@ -71,19 +70,13 @@ def _lookahead_features(first: sim.Pipe, second: sim.Pipe | None) -> list[float]
     return [(second.x - BIRD_X) / DX_SCALE, center_shift / HALF_HEIGHT]
 
 
-# Inputs:
-# 1.  Bird vertical position
-# 2.  Bird vertical velocity
-# 3.  Current pipe speed
-# 4.  Horizontal distance to the next pipe
-# 5.  Bird center offset from the gap center
-# 6.  Clearance to the top pipe (bird_top - gap_top)
-# 7.  Clearance to the bottom pipe (gap_bottom - bird_bottom)
-# 8.  Gap vertical velocity
-# 9.  Predicted gap center offset at arrival, relative to the bird
-# 10. Gap height
-# 11. Horizontal distance to the second upcoming pipe
-# 12. Gap center shift between the next two pipes
+# Inputs, in order (3 + 7 + 2):
+# observe:             1 bird y, 2 bird velocity, 3 pipe speed
+# _gap_features:       4 distance to next pipe, 5 bird offset from gap center,
+#                      6 clearance to top pipe, 7 clearance to bottom pipe,
+#                      8 gap velocity, 9 gap center on arrival relative to bird,
+#                      10 gap height
+# _lookahead_features: 11 distance to second pipe, 12 gap center shift
 OBSERVATION_SIZE = 12
 
 

@@ -31,21 +31,26 @@ MOVE_PERIOD_FRAMES = 120  # frames per full up-and-down swing
 MAX_GAP_SPEED = MOVE_AMPLITUDE * 2 * math.pi / MOVE_PERIOD_FRAMES  # px/frame, peak
 
 
-def _lerp(start: float, end: float, t: float) -> float:
-    return start + (end - start) * t
+@dataclass(frozen=True, slots=True)
+class Ramp:
+    """A value that moves linearly from `start` to `end` as progress goes from 0 to 1."""
+
+    start: float
+    end: float
+
+    def at(self, t: float) -> float:
+        """Value at progress `t`."""
+        return self.start + (self.end - self.start) * t
 
 
 @dataclass(frozen=True, slots=True)
 class GameConfig:
-    """Tunable rules. Each value starts at its base and ramps linearly to its end value."""
+    """Tunable rules. Each ramp goes linearly from its start to its end over `ramp_frames`."""
 
-    pipe_speed: float = PIPE_SPEED  # px/ms
-    gap_height: int = GAP_HEIGHT  # px
-    pipe_spacing: float = PIPE_SPACING  # px between consecutive pipes
+    speed: Ramp = Ramp(PIPE_SPEED, PIPE_SPEED)  # px/ms
+    gap_height: Ramp = Ramp(GAP_HEIGHT, GAP_HEIGHT)  # px
+    spacing: Ramp = Ramp(PIPE_SPACING, PIPE_SPACING)  # px between consecutive pipes
     ramp_frames: int = 0  # frames until the end values are reached; 0 disables the ramp
-    end_pipe_speed: float = PIPE_SPEED
-    end_gap_height: int = GAP_HEIGHT
-    end_pipe_spacing: float = PIPE_SPACING
     moving_pipes: bool = False
 
     def progress(self, frames: int) -> float:
@@ -56,23 +61,23 @@ class GameConfig:
 
     def speed_at(self, frames: int) -> float:
         """Pipe speed in px/ms after the given number of frames."""
-        return _lerp(self.pipe_speed, self.end_pipe_speed, self.progress(frames))
+        return self.speed.at(self.progress(frames))
 
     def gap_at(self, frames: int) -> int:
         """Gap height in px for a pipe spawned after the given number of frames."""
-        return round(_lerp(self.gap_height, self.end_gap_height, self.progress(frames)))
+        return round(self.gap_height.at(self.progress(frames)))
 
     def spacing_at(self, frames: int) -> float:
         """Distance in px between consecutive pipes after the given number of frames."""
-        return _lerp(self.pipe_spacing, self.end_pipe_spacing, self.progress(frames))
+        return self.spacing.at(self.progress(frames))
 
 
 EASY = GameConfig()
 HARD = GameConfig(
     ramp_frames=60 * FPS,
-    end_pipe_speed=0.27,
-    end_gap_height=96,
-    end_pipe_spacing=320,
+    speed=Ramp(PIPE_SPEED, 0.27),
+    gap_height=Ramp(GAP_HEIGHT, 96),
+    spacing=Ramp(PIPE_SPACING, 320),
     moving_pipes=True,
 )
 
@@ -84,7 +89,7 @@ MAX_FRAMES = 10_000  # cap so a perfect bird cannot run forever
 SCORE_BONUS = 100  # fitness reward per pipe passed
 HALF_HEIGHT = WORLD_HEIGHT / 2
 DX_SCALE = WORLD_WIDTH - BIRD_X
-SPEED_SCALE = max(config.end_pipe_speed for config in CONFIGS.values()) * 1.1
+SPEED_SCALE = max(config.speed.end for config in CONFIGS.values()) * 1.1
 
 
 @dataclass(frozen=True, slots=True)
